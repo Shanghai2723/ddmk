@@ -4265,6 +4265,8 @@ void Dante()
 
 			ResetConfig(Royalguard);
 			ToggleRoyalguardForceJustFrameRelease(activeConfig.Royalguard.forceJustFrameRelease);
+			ToggleRoyalguardAutoJustGuard       (activeConfig.Royalguard.autoJustGuard       );
+			ToggleRoyalguardAutoGuard           (activeConfig.Royalguard.autoGuard           );
 
 			ResetConfig(rebellionInfiniteShredder);
 			ResetConfig(Rebellion                );
@@ -4332,6 +4334,62 @@ void Dante()
 		{
 			ToggleRoyalguardForceJustFrameRelease(activeConfig.Royalguard.forceJustFrameRelease);
 		}
+
+		if
+		(
+			GUI_Checkbox2
+			(
+				"Auto Just Guard",
+				activeConfig.Royalguard.autoJustGuard,
+				queuedConfig.Royalguard.autoJustGuard
+			)
+		)
+		{
+			ToggleRoyalguardAutoJustGuard(activeConfig.Royalguard.autoJustGuard);
+		}
+		ImGui::SameLine();
+		TooltipHelper
+		(
+			"(?)",
+			"Every attack blocked while holding Royal Guard is graded as a Just Guard, ignoring the Just Guard timing window and the Royal Guard style level."
+		);
+
+		if
+		(
+			GUI_Checkbox2
+			(
+				"Auto Guard",
+				activeConfig.Royalguard.autoGuard,
+				queuedConfig.Royalguard.autoGuard
+			)
+		)
+		{
+			ToggleRoyalguardAutoGuard(activeConfig.Royalguard.autoGuard);
+		}
+		ImGui::SameLine();
+		TooltipHelper
+		(
+			"(?)",
+			"Automatically Just Guards incoming attacks while Royal Guard is equipped, without pressing the block button. The block button is injected for a few frames and then released, so the game runs its own block and Just Release. The stick is left alone, so a Just Release still needs the usual forward input. Attacks that Royal Guard cannot normally block still deal damage unless Auto Just Guard is enabled as well."
+		);
+
+		ImGui::PushItemWidth(200);
+
+		GUI_Slider2<uint8>
+		(
+			"Auto Guard Hold",
+			activeConfig.Royalguard.autoGuardHold,
+			queuedConfig.Royalguard.autoGuardHold,
+			1,
+			60
+		);
+		TooltipHelper
+		(
+			"(?)",
+			"How many frames the injected block button is held after an attack is auto guarded. A lower value releases the block sooner, which makes the Just Release trigger earlier."
+		);
+
+		ImGui::PopItemWidth();
 
 		GUI_SectionEnd();
 		ImGui::Text("");
@@ -7564,6 +7622,8 @@ void Debug()
 
 
 
+
+
 		GUI_Checkbox
 		(
 			"g_showShop",
@@ -10383,6 +10443,7 @@ void Vergil()
 			ResetConfig(enableYamatoForceEdgeNewComboPart4);
 			ResetConfig(enableYamatoForceEdgeAirStinger   );
 			ResetConfig(enableYamatoForceEdgeNewRoundTrip );
+			ResetConfig(enableVergilBossMoves             );
 
 			ResetConfig(dergil);
 			ToggleDergil(activeConfig.dergil);
@@ -10431,6 +10492,200 @@ void Vergil()
 			queuedConfig.Yamato.judgementCutCount,
 			defaultConfig.Yamato.judgementCutCount
 		);
+
+		GUI_SectionEnd();
+		ImGui::Text("");
+
+
+
+		GUI_SectionStart("Boss Moves");
+
+		GUI_Checkbox2
+		(
+			"Enable Boss Moves",
+			activeConfig.enableVergilBossMoves,
+			queuedConfig.enableVergilBossMoves
+		);
+		ImGui::SameLine();
+		TooltipHelper
+		(
+			"(?)",
+			"Requires enabled Actor module.\n"
+			"\n"
+			"Play Boss Vergil moves as playable Vergil.\n"
+			"\n"
+			"Shield: Shoot (without Lock-On)\n"
+			"Block: Style Action (without Lock-On)\n"
+			"Strong Shield: Lock-On + Stick Down + Devil Trigger\n"
+			"Super Judgement Cut: Lock-On + Stick Down/Up + Melee Attack + Style Action\n"
+			"\n"
+			"The motions are the boss's own, read from the\n"
+			"em035 archive at runtime."
+		);
+		ImGui::Text("");
+
+		GUI_Checkbox
+		(
+			"Debug Log",
+			g_vergilBossMovesDebugLog
+		);
+		ImGui::SameLine();
+		TooltipHelper
+		(
+			"(?)",
+			"Log played Boss Vergil motions\n"
+			"to logs\\Mary.txt."
+		);
+		ImGui::Text("");
+
+		GUI_Checkbox
+		(
+			"Direct Motion",
+			g_vergilBossMotionDirectPlay
+		);
+		ImGui::SameLine();
+		TooltipHelper
+		(
+			"(?)",
+			"Experimental motion route.\n"
+			"\n"
+			"Off: play through the player's own motion lookup\n"
+			"(group / index), like the Quicksilver port does.\n"
+			"\n"
+			"On: hand the boss's motion file straight to the\n"
+			"model, per body part, bypassing that lookup.\n"
+			"\n"
+			"On is the normal setting: the other route hangs the\n"
+			"game on some of these motions."
+		);
+		ImGui::Text("");
+
+		GUI_Checkbox
+		(
+			"Motion Frame Range",
+			g_vergilBossMotionFrameRange
+		);
+		ImGui::SameLine();
+		TooltipHelper
+		(
+			"(?)",
+			"How long each motion is held for.\n"
+			"\n"
+			"On: read the frame range out of the motion file's\n"
+			"own header and hold the animation for that length.\n"
+			"\n"
+			"Off: use the length the game reports for the model.\n"
+			"That value is the end frame of the animation, not\n"
+			"its length, so any motion that does not start at\n"
+			"frame 0 is held far too long (Shield: 4.7 s\n"
+			"instead of 2.2 s)."
+		);
+		ImGui::Text("");
+
+		GUI_Checkbox
+		(
+			"Move Effects",
+			g_vergilBossMoveEffects
+		);
+		ImGui::SameLine();
+		TooltipHelper
+		(
+			"(?)",
+			"Spawn the effects these moves have, using the\n"
+			"game's own object spawner.\n"
+			"\n"
+			"The effects are not part of the motion data: the\n"
+			"game creates them from code while the move plays.\n"
+			"\n"
+			"Off: motion only, no effects."
+		);
+		ImGui::Text("");
+
+		GUI_Checkbox
+		(
+			"Shield Barrier",
+			g_vergilBossMoveEffectShield
+		);
+		ImGui::SameLine();
+		TooltipHelper
+		(
+			"(?)",
+			"Barrier effect for Shield and Strong Shield\n"
+			"(effect 0x283, from the boss's own state).\n"
+			"\n"
+			"Needs Move Effects."
+		);
+		ImGui::Text("");
+
+		GUI_Checkbox
+		(
+			"Summoned Sword",
+			g_vergilBossMoveEffectSword
+		);
+		ImGui::SameLine();
+		TooltipHelper
+		(
+			"(?)",
+			"Sword effect for the Super Judgement Cut draw\n"
+			"(effect 0x337, unconfirmed).\n"
+			"\n"
+			"Needs Move Effects."
+		);
+		ImGui::Text("");
+
+		GUI_Checkbox
+		(
+			"Judgement Cut Slash",
+			g_vergilBossMoveEffectSlash
+		);
+		ImGui::SameLine();
+		TooltipHelper
+		(
+			"(?)",
+			"Slash effect for the Super Judgement Cut cut\n"
+			"(effect 0x338, the same one the player's own\n"
+			"Judgement Cut spawns).\n"
+			"\n"
+			"Needs Move Effects."
+		);
+		ImGui::Text("");
+
+		GUI_Checkbox
+		(
+			"Control IDs",
+			g_vergilBossMoveEffectControl
+		);
+		ImGui::SameLine();
+		TooltipHelper
+		(
+			"(?)",
+			"Diagnostic. Also spawns the game's own effect\n"
+			"IDs 0x29C and 0x356 at the same frame, through\n"
+			"the same call, to test whether the spawn path\n"
+			"itself works.\n"
+			"\n"
+			"Turn this off for normal play."
+		);
+		ImGui::Text("");
+
+		GUI_Checkbox
+		(
+			"Sub Effect IDs",
+			g_vergilBossMoveEffectSubIds
+		);
+	ImGui::SameLine();
+	TooltipHelper
+		(
+			"(?)",
+			"Diagnostic. The definitions of the summoned\n"
+			"sword and the judgement cut list sub-effect\n"
+			"ids. This spawns those ids directly, next to\n"
+			"the parent effect.\n"
+			"\n"
+			"Turn this off for normal play."
+		);
+		ImGui::Text("");
+
 
 		GUI_SectionEnd();
 		ImGui::Text("");

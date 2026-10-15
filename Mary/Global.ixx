@@ -240,6 +240,26 @@ export new_size_t g_lastSaveIndex = 0;
 
 export bool g_noTeleport = false;
 
+export bool g_vergilBossMovesDebugLog = true;
+
+export bool g_vergilBossMotionDirectPlay = true;
+
+export bool g_vergilBossMotionFrameRange = true;
+
+export bool g_vergilBossMoveEffects = true;
+export bool g_vergilBossMoveEffectShield = true;
+export bool g_vergilBossMoveEffectSword = true;
+export bool g_vergilBossMoveEffectSlash = true;
+
+// v36 control experiment: also spawn the game's own effect IDs 0x29C and 0x356
+// through the same call, at the same frame, to prove the spawn path itself.
+// PROVEN in v36: they draw. Left off by default now.
+export bool g_vergilBossMoveEffectControl = false;
+
+// v38: the definitions of 0x337 / 0x338 are a list of sub-effect ids in the
+// same numbering space as the ids that do draw. Spawn those directly.
+export bool g_vergilBossMoveEffectSubIds = true;
+
 
 
 #pragma region SecretMission

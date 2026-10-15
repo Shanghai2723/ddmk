@@ -509,6 +509,8 @@ void EventHandler(EventData & eventData)
 			CharacterSwitchController();
 			BossLadyController();
 			BossVergilController();
+			VergilBossMovesController();
+			RoyalguardAutoGuardController();
 
 			break;
 		}

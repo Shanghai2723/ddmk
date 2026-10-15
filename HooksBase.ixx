@@ -184,8 +184,6 @@ void UpdateKeyboard()
 
 	ImGui::DI8::UpdateKeyboard(&keyboard.state);
 
-
-
 	auto & state = keyboard.state;
 
 

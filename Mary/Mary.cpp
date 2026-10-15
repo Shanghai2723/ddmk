@@ -210,6 +210,8 @@ uint32 DllMain
 
 		ToggleAirHikeCoreAbility               (activeConfig.airHikeCoreAbility                );
 		ToggleRoyalguardForceJustFrameRelease  (activeConfig.Royalguard.forceJustFrameRelease  );
+		ToggleRoyalguardAutoJustGuard          (activeConfig.Royalguard.autoJustGuard          );
+		ToggleRoyalguardAutoGuard              (activeConfig.Royalguard.autoGuard              );
 		ToggleRebellionInfiniteSwordPierce     (activeConfig.Rebellion.infiniteSwordPierce     );
 		ToggleYamatoForceEdgeInfiniteRoundTrip (activeConfig.YamatoForceEdge.infiniteRoundTrip );
 		ToggleEbonyIvoryFoursomeTime           (activeConfig.EbonyIvory.foursomeTime           );

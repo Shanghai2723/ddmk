@@ -23,7 +23,7 @@ import Vars;
 const char * directoryName = "configs";
 const char * fileName      = "Mary.json";
 
-char location[64] = {};
+static char location[64] = {};
 
 
 
@@ -186,6 +186,9 @@ export struct Config
 	struct
 	{
 		bool forceJustFrameRelease = false;
+		bool autoJustGuard         = false;
+		bool autoGuard             = false;
+		uint8 autoGuardHold        = 10;
 	}
 	Royalguard;
 
@@ -559,7 +562,7 @@ export struct Config
 	// To avoid surprises by using __declspec(align) we prefer _(n) and
 	// static_assert to get the correct alignment.
 
-	_(10);
+	_(7);
 	float kalinaAnnHookGrenadeHeight = 1280.0f;
 	_(12);
 	float kalinaAnnHookGrenadeTime = 90.0f;
@@ -609,6 +612,7 @@ export struct Config
 	bool enableYamatoForceEdgeNewComboPart4 = (debug) ? true : false;
 	bool enableYamatoForceEdgeAirStinger    = (debug) ? true : false;
 	bool enableYamatoForceEdgeNewRoundTrip  = (debug) ? true : false;
+	bool enableVergilBossMoves              = (debug) ? true : false;
 
 
 
@@ -622,7 +626,7 @@ export struct Config
 
 	bool forceVisibleHUD = false;
 
-	_(6);
+	_(5);
 
 
 
@@ -1473,6 +1477,9 @@ void CreateMembers(Config & Prep_arg(config))
 		auto & config = Prep_arg(config).Royalguard;
 
 		Create<bool>(member, "forceJustFrameRelease", config.forceJustFrameRelease);
+		Create<bool>(member, "autoJustGuard"        , config.autoJustGuard        );
+		Create<bool>(member, "autoGuard"            , config.autoGuard            );
+		Create<uint8>(member, "autoGuardHold"       , config.autoGuardHold        );
 	}
 
 
@@ -1666,6 +1673,7 @@ void CreateMembers(Config & Prep_arg(config))
 	Create<bool >(member, "enableYamatoForceEdgeNewComboPart4", config.enableYamatoForceEdgeNewComboPart4);
 	Create<bool >(member, "enableYamatoForceEdgeAirStinger"   , config.enableYamatoForceEdgeAirStinger   );
 	Create<bool >(member, "enableYamatoForceEdgeNewRoundTrip" , config.enableYamatoForceEdgeNewRoundTrip );
+	Create<bool >(member, "enableVergilBossMoves"             , config.enableVergilBossMoves             );
 	Create<uint8>(member, "dergil"                            , config.dergil                            );
 
 	CreateArray<uint8, 2>(member, "beowulfVergilAirRisingSunCount", config.beowulfVergilAirRisingSunCount);
@@ -2113,6 +2121,9 @@ void ToJSON(Config & Prep_arg(config))
 		auto & config = Prep_arg(config).Royalguard;
 
 		Set<bool>(member["forceJustFrameRelease"], config.forceJustFrameRelease);
+		Set<bool>(member["autoJustGuard"        ], config.autoJustGuard        );
+		Set<bool>(member["autoGuard"            ], config.autoGuard            );
+		Set<uint8>(member["autoGuardHold"       ], config.autoGuardHold        );
 	}
 
 
@@ -2267,6 +2278,7 @@ void ToJSON(Config & Prep_arg(config))
 	Set<bool >(member["enableYamatoForceEdgeNewComboPart4"], config.enableYamatoForceEdgeNewComboPart4);
 	Set<bool >(member["enableYamatoForceEdgeAirStinger"   ], config.enableYamatoForceEdgeAirStinger   );
 	Set<bool >(member["enableYamatoForceEdgeNewRoundTrip" ], config.enableYamatoForceEdgeNewRoundTrip );
+	Set<bool >(member["enableVergilBossMoves"              ], config.enableVergilBossMoves             );
 	Set<uint8>(member["dergil"                            ], config.dergil                            );
 
 	SetArray<uint8, 2>(member["beowulfVergilAirRisingSunCount"], config.beowulfVergilAirRisingSunCount);
@@ -2703,6 +2715,9 @@ void ToConfig(Config & Prep_arg(config))
 		auto & member = root["Royalguard"];
 
 		config.forceJustFrameRelease = Get<bool>(member["forceJustFrameRelease"]);
+		config.autoJustGuard         = Get<bool>(member["autoJustGuard"]);
+		config.autoGuard             = Get<bool>(member["autoGuard"]);
+		config.autoGuardHold         = Get<uint8>(member["autoGuardHold"]);
 	}
 
 
@@ -2855,6 +2870,7 @@ void ToConfig(Config & Prep_arg(config))
 	config.enableYamatoForceEdgeNewComboPart4 = Get<bool >(member["enableYamatoForceEdgeNewComboPart4"]);
 	config.enableYamatoForceEdgeAirStinger    = Get<bool >(member["enableYamatoForceEdgeAirStinger"   ]);
 	config.enableYamatoForceEdgeNewRoundTrip  = Get<bool >(member["enableYamatoForceEdgeNewRoundTrip" ]);
+	config.enableVergilBossMoves              = Get<bool >(member["enableVergilBossMoves"              ]);
 	config.dergil                             = Get<uint8>(member["dergil"                            ]);
 
 	GetArray<uint8, 2>(config.beowulfVergilAirRisingSunCount, member["beowulfVergilAirRisingSunCount"]);

@@ -6783,6 +6783,2118 @@ export void BossVergilController()
 
 
 
+//
+// Vergil Boss Moves
+//
+// Play Boss Vergil moves on playable Vergil.
+//
+// Boss motion archives come from the always-cached em035 file
+// (File_staticFiles, see File.ixx): its subfiles 7-10 are the Boss
+// Vergil motion archives, motion groups 0-3. Verified against a live
+// Boss Vergil actor: its motionArchives[0-3] point at these same
+// subfiles, but inside the game's own copy of em035, not inside the
+// ddmk buffer. The two copies are byte-identical layouts, so the
+// (group, index) pairs below resolve the same way in both.
+//
+// The pairs were measured at runtime: on every Boss Vergil
+// (event, state, variant) change the actor struct was scanned for
+// pointers into the four motion subfiles and each hit was mapped
+// back to (group, index) through the inner archive header.
+//
+// Pairs are replayed on the player by swapping the player motion
+// archive with the boss one around a func_1EFB90 call
+// (see PlayQuicksilverMotion).
+//
+
+//
+// Measured event -> motion sequences (see PLAN-boss-vergil-movement.md
+// §8.16 / §8.17). group 3 = em035 subfile 10.
+//
+// The boss does not chain these motions by themselves: its state
+// machine holds each motion and decides when to move on (measured:
+// the shield pose is held about 2 s, the Super Judgement Cut slash
+// pose is held for several seconds). So each step carries the number
+// of frames it is held for, taken from the measured state timings
+// (60 fps).
+//
+
+//
+// Effect object ids the boss spawns for these moves (PLAN §8.25 (3)).
+// They are not character specific: the player's own Judgement Cut
+// already spawns 0x338 through the same spawner.
+//
+
+enum VERGIL_BOSS_EFFECT
+{
+	SHIELD_BARRIER = 0x283, // guard barrier (boss STRONG_SHIELD state)
+	PHANTOM_SWORD = 0x337, // summoned sword (unconfirmed)
+	JUDGEMENT_CUT = 0x338, // judgement cut slash
+
+	//
+	// v36 control group. These two IDs are the game's OWN effects, and the
+	// live 0x180 dump of the v35 session shows them running in the very same
+	// effect pool as ours (objects 0x1F15500 / 0x1F15680, id=29C). Spawning
+	// them through our own call is the control experiment:
+	//
+	//   they draw -> our spawn path is correct and only 0x337 / 0x338 fail,
+	//                 so the difference is inside those two IDs
+	//   they do not -> our call itself is wrong, no matter what we compare
+	//
+
+	CONTROL_29C = 0x29C,
+	CONTROL_356 = 0x356,
+};
+
+struct VergilBossMotionStep
+{
+	uint32 group;
+	uint32 index;
+	uint32 frames;
+	uint32 effect; // effect object id, 0 = none (PLAN §8.25)
+	uint32 effectFrame; // frame inside the step the effect is spawned at
+};
+
+struct VergilBossMotionSequence
+{
+	uint32 count;
+	VergilBossMotionStep steps[4];
+};
+
+//
+// variant is the boss weapon style: 1 = Yamato / Beowulf,
+// 2 = Force Edge (measured on the boss's own selector, 0xEF0C).
+// Measured in both styles: the shield moves select the same motions
+// with variant 1 and 2, so the parameter does not change anything
+// yet. It is kept because the boss data is keyed by it.
+//
+
+static const VergilBossMotionSequence * GetVergilBossMotionSequence(uint32 event, uint32 variant)
+{
+	//
+	// The frame counts here are only a fallback: each step normally
+	// runs for the real length of its animation, read from its MOT
+	// header (PLAN §8.26).
+	//
+	// The effect ids and the frames they spawn at are the boss's own
+	// (PLAN §8.25). The boss spawns them from inside each state, so
+	// they are keyed to the frame of the matching motion.
+	//
+
+	static constexpr VergilBossMotionSequence block { 1, { { 3, 60, 50, 0, 0 } } };
+	static constexpr VergilBossMotionSequence shield { 2, { { 3, 65, 140, VERGIL_BOSS_EFFECT::SHIELD_BARRIER, 30 }, { 3, 66, 141, 0, 0 } } };
+
+	//
+	// Measured: the draw pose (85) is 27 frames, the slash pose (86)
+	// is 34. The boss then holds 86 looping for several seconds while
+	// the cut plays; that hold belongs to the effect, which is not
+	// ported yet. Both Super Judgement Cut variants use this pair.
+	//
+
+	static constexpr VergilBossMotionSequence superJudgementCut { 2, { { 3, 85, 27, VERGIL_BOSS_EFFECT::PHANTOM_SWORD, 10 }, { 3, 86, 62, VERGIL_BOSS_EFFECT::JUDGEMENT_CUT, 6 } } };
+
+	switch (event)
+	{
+		case EVENT_BOSS_VERGIL::BLOCK:
+		{
+			return &block;
+		}
+
+		case EVENT_BOSS_VERGIL::SHIELD:
+		case EVENT_BOSS_VERGIL::STRONG_SHIELD:
+		{
+			return &shield;
+		}
+
+		case EVENT_BOSS_VERGIL::YAMATO_SUPER_JUDGEMENT_CUT:
+		case EVENT_BOSS_VERGIL::YAMATO_SUPER_JUDGEMENT_CUT_FOLLOW:
+		{
+			return &superJudgementCut;
+		}
+	}
+
+	return nullptr;
+}
+
+static bool g_vergilBossMovesGuard = false;
+
+//
+// em035 outer PAC subfile indices for motion groups 0-3.
+//
+
+static constexpr uint32 g_bossVergilSubfileIndices[] = { 7, 8, 9, 10 };
+
+static byte8 * GetBossVergilMotionArchive(uint32 group)
+{
+	if (group >= countof(g_bossVergilSubfileIndices))
+	{
+		return nullptr;
+	}
+
+	byte8 * file = File_staticFiles[em035];
+
+	if (!file || !IsArchive(file))
+	{
+		return nullptr;
+	}
+
+	auto & archiveMetadata = *reinterpret_cast<ArchiveMetadata *>(file);
+
+	if (archiveMetadata.fileCount <= g_bossVergilSubfileIndices[group])
+	{
+		return nullptr;
+	}
+
+	return (file + archiveMetadata.fileOffs[g_bossVergilSubfileIndices[group]]);
+}
+
+//
+// Pointer to the raw MOT file of a boss motion (group / index), or nullptr.
+//
+
+static byte8 * GetBossVergilMotionFile(uint32 group, uint32 index)
+{
+	auto archive = GetBossVergilMotionArchive(group);
+
+	if (!archive)
+	{
+		return nullptr;
+	}
+
+	auto & archiveMetadata = *reinterpret_cast<ArchiveMetadata *>(archive);
+
+	if (archiveMetadata.fileCount <= index)
+	{
+		return nullptr;
+	}
+
+	auto fileOff = archiveMetadata.fileOffs[index];
+
+	if (!fileOff)
+	{
+		return nullptr;
+	}
+
+	return (archive + fileOff);
+}
+
+//
+// Find the model data the game is actually animating. More than one table can
+// hold a model pointer (ddmk's own model slots, the relocated body-part table,
+// the game's original one). Only the live one carries a running motion clock,
+// so probe each and keep the first that shows one.
+//
+
+static ModelData * g_vergilBossModelData[2] = {};
+
+static bool ProbeVergilBossModelData(uint32 bodyPart, ModelData * modelDataAddr, const char * tag)
+{
+	if (!modelDataAddr)
+	{
+		return false;
+	}
+
+	float32 duration = 0.0f;
+	float32 timer = 0.0f;
+	uint32 init = 0;
+
+	__try
+	{
+		duration = modelDataAddr->Motion.duration[bodyPart];
+		timer = modelDataAddr->Motion.timer[bodyPart];
+		init = (uint32) modelDataAddr->Motion.init;
+	}
+	__except (1)
+	{
+		Log
+		(
+			"VergilBossMoves Model %s bp=%u model=%p unreadable",
+			tag,
+			bodyPart,
+			modelDataAddr
+		);
+
+		return false;
+	}
+
+	//
+	// The first candidate is the live one in every observed run, so only
+	// a rejected candidate is worth a line here.
+	//
+
+	if ((duration > 0.0f) || (init != 0))
+	{
+		return true;
+	}
+
+	Log
+	(
+		"VergilBossMoves Model %s bp=%u model=%p not live dur=%.2f timer=%.2f init=%u",
+		tag,
+		bodyPart,
+		modelDataAddr,
+		duration,
+		timer,
+		init
+	);
+
+	return false;
+}
+
+static ModelData * GetVergilBossModelData(PlayerActorData & actorData, uint32 bodyPart)
+{
+	if (g_vergilBossModelData[bodyPart])
+	{
+		return g_vergilBossModelData[bodyPart];
+	}
+
+	ModelData * candidates[] =
+	{
+		&actorData.newModelData[0],
+		actorData.newBodyPartData[0][bodyPart].modelDataAddr,
+		actorData.bodyPartData[0][bodyPart].modelDataAddr,
+	};
+
+	static const char * tags[] =
+	{
+		"newModelData",
+		"newBodyPartData",
+		"bodyPartData",
+	};
+
+	for (uint32 index = 0; index < countof(candidates); index++)
+	{
+		if (ProbeVergilBossModelData(bodyPart, candidates[index], tags[index]))
+		{
+			g_vergilBossModelData[bodyPart] = candidates[index];
+
+			Log
+			(
+				"VergilBossMoves Model live bp=%u model=%p",
+				bodyPart,
+				candidates[index]
+			);
+
+			return candidates[index];
+		}
+	}
+
+	Log
+	(
+		"VergilBossMoves Model none bp=%u",
+		bodyPart
+	);
+
+	return &actorData.newModelData[0];
+}
+
+//
+// Direct playback: hand the MOT file to the model per body part, bypassing the
+// player action / motion lookup entirely (same call the debug inspector uses).
+//
+
+static bool PlayVergilBossMotionStepDirect(PlayerActorData & actorData, const VergilBossMotionStep & step, bool quiet = false)
+{
+	auto motionFile = GetBossVergilMotionFile(step.group, step.index);
+
+	if (!motionFile)
+	{
+		Log
+		(
+			"VergilBossMoves Direct no motion file group=%u index=%u",
+			step.group,
+			step.index
+		);
+
+		return false;
+	}
+
+	uint32 played = 0;
+	ModelData * modelDataAddr = nullptr;
+
+	for (uint32 bodyPart = 0; bodyPart < 2; bodyPart++)
+	{
+		auto & bodyPartData = actorData.newBodyPartData[0][bodyPart];
+
+		modelDataAddr = GetVergilBossModelData(actorData, bodyPart);
+
+		func_8AC80
+		(
+			*modelDataAddr,
+			bodyPart,
+			motionFile,
+			0,
+			false
+		);
+
+		bodyPartData.busy = false;
+
+		//
+		// Restart the motion: the previous animation leaves its own
+		// playback time behind, which would sample the new motion past
+		// its end (a still pose).
+		//
+
+		modelDataAddr->Motion.timer[bodyPart] = 0.0f;
+
+		played++;
+	}
+
+	if (!quiet)
+	{
+		Log
+		(
+			"VergilBossMoves Direct group=%u index=%u mot=%p played=%u model=%p dur=%.2f/%.2f timer=%.2f/%.2f init=%u busy=%u/%u",
+			step.group,
+			step.index,
+			motionFile,
+			played,
+			modelDataAddr,
+			modelDataAddr->Motion.duration[LOWER_BODY],
+			modelDataAddr->Motion.duration[UPPER_BODY],
+			modelDataAddr->Motion.timer[LOWER_BODY],
+			modelDataAddr->Motion.timer[UPPER_BODY],
+			(uint32) modelDataAddr->Motion.init,
+			(uint32) actorData.newBodyPartData[0][LOWER_BODY].busy,
+			(uint32) actorData.newBodyPartData[0][UPPER_BODY].busy
+		);
+	}
+
+	return (played > 0);
+}
+
+struct VergilBossMotion
+{
+	bool active = false;
+	const VergilBossMotionSequence * sequence = nullptr;
+	uint32 step = 0;
+	uint32 frames = 0;
+	uint32 group = 0;
+	uint32 index = 0;
+	uint32 overrides = 0;
+	uint32 length = 0;
+	uint32 hold = 0;
+	bool effectSpawned = false;
+};
+
+static VergilBossMotion g_vergilBossMotion = {};
+
+//
+// The MOT header carries the frame range the animation is authored over:
+// +0x08 start frame, +0x0C end frame (PLAN §8.24). The model reports the
+// end of that range as ModelData.Motion.duration, so duration is a frame
+// position, not a length. A motion that starts past frame 0 therefore runs
+// far too long when the end is used as its length: measured on em035, the
+// shield's second step is a single frame but reports 141, and the shield
+// ran 281 frames instead of 131 (PLAN §8.26).
+//
+
+static bool GetBossVergilMotionFrameRange(uint32 group, uint32 index, float32 & startFrame, float32 & endFrame)
+{
+	auto motionFile = GetBossVergilMotionFile(group, index);
+
+	if (!motionFile)
+	{
+		return false;
+	}
+
+	if
+	(
+		(*(uint32 *) motionFile < 0x18) ||
+		(motionFile[4] != 'M') ||
+		(motionFile[5] != 'O') ||
+		(motionFile[6] != 'T')
+	)
+	{
+		return false;
+	}
+
+	startFrame = *(float32 *)(motionFile + 0x08);
+	endFrame = *(float32 *)(motionFile + 0x0C);
+
+	return (endFrame > startFrame);
+}
+
+static void ArmVergilBossMotionStep(uint32 stepIndex)
+{
+	auto sequence = g_vergilBossMotion.sequence;
+	auto & step = sequence->steps[stepIndex];
+
+	uint32 length = 0;
+	uint32 source = 0;
+	float32 startFrame = 0.0f;
+	float32 endFrame = 0.0f;
+	bool haveRange = false;
+
+	if (g_vergilBossMotionFrameRange)
+	{
+		haveRange = GetBossVergilMotionFrameRange(step.group, step.index, startFrame, endFrame);
+
+		if (haveRange)
+		{
+			length = (uint32) (endFrame - startFrame);
+			source = 1;
+		}
+	}
+
+	//
+	// Only when the header could not be read: for a motion that starts at
+	// frame 0 the model's duration is the length, otherwise it is not.
+	//
+
+	if (!length && !haveRange)
+	{
+		auto modelDataAddr = g_vergilBossModelData[LOWER_BODY];
+
+		if (modelDataAddr)
+		{
+			auto duration = modelDataAddr->Motion.duration[LOWER_BODY];
+
+			if (duration > 0.0f)
+			{
+				length = (uint32) duration;
+				source = 2;
+			}
+		}
+	}
+
+	if (!length)
+	{
+		length = step.frames;
+		source = 3;
+	}
+
+	g_vergilBossMotion.length = length;
+	g_vergilBossMotion.hold = length;
+
+	Log
+	(
+		"VergilBossMoves Arm step=%u group=%u index=%u length=%u hold=%u src=%u range=%.2f-%.2f",
+		stepIndex,
+		step.group,
+		step.index,
+		length,
+		g_vergilBossMotion.hold,
+		source,
+		startFrame,
+		endFrame
+	);
+}
+
+//
+// Effects are not carried by the MOT files: the game spawns them from code
+// (PLAN §8.25). dmc3.exe+0x2E7CA0 is the object spawner used from 751 call
+// sites: class 3 = effect object, then the effect id, a 4x4 matrix (NULL =
+// identity) and flags. The player's own Judgement Cut passes the matrix of
+// the equipped weapon, taken from the weapon actor table at actor + 0x1880
+// using the current weapon index (measured 0x140225835-0x14022586E), and
+// flags 8.
+//
+
+static bool GetVergilBossMoveEffectEnabled(uint32 effect)
+{
+	switch (effect)
+	{
+		case VERGIL_BOSS_EFFECT::SHIELD_BARRIER:
+		{
+			return g_vergilBossMoveEffectShield;
+		}
+
+		case VERGIL_BOSS_EFFECT::PHANTOM_SWORD:
+		{
+			return g_vergilBossMoveEffectSword;
+		}
+
+		case VERGIL_BOSS_EFFECT::JUDGEMENT_CUT:
+		{
+			return g_vergilBossMoveEffectSlash;
+		}
+
+		case VERGIL_BOSS_EFFECT::CONTROL_29C:
+		{
+			return g_vergilBossMoveEffectControl;
+		}
+
+		case VERGIL_BOSS_EFFECT::CONTROL_356:
+		{
+			return g_vergilBossMoveEffectControl;
+		}
+	}
+
+	return false;
+}
+
+static byte8 * GetVergilBossEffectMatrix(PlayerActorData & actorData, int32 & outRow, int32 & outSlot, bool & outCrashed)
+{
+	outRow = -1;
+	outSlot = -1;
+	outCrashed = false;
+
+	//
+	// dmc3.exe keeps its model physics pool at +0x1880, but ddmk moves the
+	// player's live pool to newModelPhysicsMetadataPool (0xE5D0) and patches the
+	// game's own references to it (ActorRelocations.ixx L616-759). Reading
+	// +0x1880 on the player therefore finds nothing: measured index=-1 with no
+	// crash in the v26 log.
+	//
+
+	uint32 row = actorData.activeModelIndex;
+
+	if (row >= 7)
+	{
+		row = 0;
+	}
+
+	byte8 * matrix = nullptr;
+
+	__try
+	{
+		//
+		// The active model row first, then every other row. Slot 3 is tried
+		// before the others: that is the entry ddmk's own lock-on code reads
+		// (Actor.ixx L10081). Any entry of this actor places the effect on the
+		// character instead of at the world origin.
+		//
+
+		for (uint32 pass = 0; pass < 7; pass++)
+		{
+			uint32 r = ((pass == 0) ? row : (((pass - 1) < row) ? (pass - 1) : pass));
+
+			for (uint32 attempt = 0; attempt <= 24; attempt++)
+			{
+				uint32 slot = ((attempt == 0) ? 3 : (attempt - 1));
+
+				if (slot == 3)
+				{
+					continue;
+				}
+
+				auto entry = actorData.newModelPhysicsMetadataPool[r][slot];
+
+				if (!entry)
+				{
+					continue;
+				}
+
+				auto candidate = reinterpret_cast<byte8 *>(entry->physicsData);
+
+				if (candidate)
+				{
+					outRow = (int32) r;
+					outSlot = (int32) slot;
+					matrix = candidate;
+
+					break;
+				}
+			}
+
+			if (matrix)
+			{
+				break;
+			}
+		}
+	}
+	__except (1)
+	{
+		outCrashed = true;
+	}
+
+	return matrix;
+}
+
+static void DumpVergilBossEffectSystem()
+{
+	static bool dumped = false;
+
+	if (dumped)
+	{
+		return;
+	}
+
+	dumped = true;
+
+	//
+	// func_2E7CA0 class 3 -> 0x140324460 -> 0x140324570 -> 0x140324DE0 ->
+	// 0x140337600. That last call is the only place in the chain that can
+	// return NULL: it fails when the pool descriptor at dmc3.exe+0xCAB130 has
+	// no buffer (+0x08) or no block count (+0x18), or when the pool has no
+	// free block left. The definition table is the other input worth
+	// measuring: 0x140324F20 scans 256 entries of 0x10 bytes at
+	// dmc3.exe+0xCF1270 and matches the effect id at +0x08 of each entry.
+	//
+
+	byte8 * pool = appBaseAddr + 0xCAB130;
+	byte8 * registry = appBaseAddr + 0xCF1270;
+
+	__try
+	{
+		uint32 count = 0;
+		uint32 ids[8] = {};
+
+		for (uint32 i = 0; i < 0x100; i++)
+		{
+			uint32 id = *(uint16 *)(registry + 0x08 + (i * 0x10));
+
+			if (id)
+			{
+				if (count < 8)
+				{
+					ids[count] = id;
+				}
+
+				count++;
+			}
+		}
+
+		Log
+		(
+			"VergilBossMoves EffectReg ids=%u first=%04X %04X %04X %04X %04X %04X %04X %04X",
+			count,
+			ids[0],
+			ids[1],
+			ids[2],
+			ids[3],
+			ids[4],
+			ids[5],
+			ids[6],
+			ids[7]
+		);
+
+		Log
+		(
+			"VergilBossMoves EffectPool a=%p b=%p c=%p d=%p blockSize=%u blockCount=%u",
+			*(void **)(pool + 0x00),
+			*(void **)(pool + 0x08),
+			*(void **)(pool + 0x10),
+			*(void **)(pool + 0x18),
+			*(uint32 *)(pool + 0x14),
+			*(uint32 *)(pool + 0x18)
+		);
+	}
+	__except (1)
+	{
+		Log("VergilBossMoves EffectReg CRASH");
+	}
+}
+
+//
+// The object side is settled: our objects and the game's own working ones
+// are identical in vtable, flags, class, active byte and attach pointer, and
+// the game's update loop ticks both (the +0x08 / +0x1C counters advance).
+// What is left is the definition the object points at through +0x148.
+// 0x140324680 indexes it with 0x2C-stride records and reads a float at
+// record+0x0C, so dump the header and the first records as both hex and
+// float and compare ours with the definitions of effects that DO draw.
+//
+
+//
+// v37 (2). The control experiment proved the spawn path: the game's own IDs
+// 0x29C and 0x356 draw through our exact call, 0x337 / 0x338 do not. The only
+// remaining variable is the ID and its definition, so dump EVERY record of
+// every definition that is reached, not just the first one.
+//
+
+static void DumpVergilBossEffectRecords(byte8 * definition, uint32 effect)
+{
+	if (!definition)
+	{
+		return;
+	}
+
+	uint32 records = 0;
+
+	__try
+	{
+		records = *(uint16 *)definition;
+	}
+	__except (1)
+	{
+		return;
+	}
+
+	if (records > 0x08)
+	{
+		records = 0x08;
+	}
+
+	for (uint32 i = 0; i < records; i++)
+	{
+		uint32 d[0x0B] = {};
+		bool crashed = false;
+
+		__try
+		{
+			for (uint32 j = 0; j < 0x0B; j++)
+			{
+				d[j] = *(uint32 *)((definition + 0x04) + (i * 0x2C) + (j * 4));
+			}
+		}
+		__except (1)
+		{
+			crashed = true;
+		}
+
+		if (crashed)
+		{
+			break;
+		}
+
+		Log
+		(
+			"VergilBossMoves Rec id=%X rec=%u d0=%08X d1=%08X d2=%08X d3=%08X d4=%08X d5=%08X d6=%08X d7=%08X d8=%08X d9=%08X dA=%08X",
+			effect, i,
+			d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9], d[0xA]
+		);
+	}
+}
+
+static uint32 g_vergilBossDefinitionProbes = 0;
+static byte8 * g_vergilBossDefinitionSeen[0x10] = {};
+
+static void ProbeVergilBossEffectDefinition(byte8 * definition, uint32 effect)
+{
+	if (!definition || (g_vergilBossDefinitionProbes >= 0x10))
+	{
+		return;
+	}
+
+	//
+	// One dump per definition, not one per object: the same effect id is
+	// spawned many times in a session.
+	//
+
+	for (uint32 i = 0; i < 0x10; i++)
+	{
+		if (g_vergilBossDefinitionSeen[i] == definition)
+		{
+			return;
+		}
+	}
+
+	g_vergilBossDefinitionSeen[g_vergilBossDefinitionProbes++] = definition;
+
+	uint32 records = 0;
+	uint32 head[0x10] = {};
+	bool crashed = false;
+
+	__try
+	{
+		records = *(uint16 *)definition;
+
+		for (uint32 i = 0; i < 0x10; i++)
+		{
+			head[i] = *(uint32 *)(definition + (i * 4));
+		}
+	}
+	__except (1)
+	{
+		crashed = true;
+	}
+
+	Log
+	(
+		"VergilBossMoves Def id=%X def=%p crashed=%u recs=%u h0=%08X h1=%08X h2=%08X h3=%08X h4=%08X h5=%08X h6=%08X h7=%08X",
+		effect,
+		definition,
+		(crashed ? 1u : 0u),
+		records,
+		head[0], head[1], head[2], head[3], head[4], head[5], head[6], head[7]
+	);
+
+	Log
+	(
+		"VergilBossMoves Def id=%X def=%p h8=%08X h9=%08X hA=%08X hB=%08X hC=%08X hD=%08X hE=%08X hF=%08X f0C=%.3f f14=%.3f",
+		effect,
+		definition,
+		head[8], head[9], head[0xA], head[0xB], head[0xC], head[0xD], head[0xE], head[0xF],
+		*reinterpret_cast<float32 *>(&head[3]),
+		*reinterpret_cast<float32 *>(&head[5])
+	);
+
+	DumpVergilBossEffectRecords(definition, effect);
+}
+
+//
+// Full field dump. Our 0x283 IS drawn and our 0x337 / 0x338 are not, and the
+// game's own effects in the same pool are the reference. Dump the whole 0x150
+// block of each (0x180: the per-frame update path dereferences
+// [object+0x168], which is past the 0x150 the allocator requests) so the
+// fields can be compared one by one.
+//
+
+static uint32 g_vergilBossEffectBytesOurs = 0;
+static uint32 g_vergilBossEffectBytesGame = 0;
+
+static void DumpVergilBossEffectBytes(byte8 * object, uint32 effect, bool ours)
+{
+	if (!object)
+	{
+		return;
+	}
+
+	if (ours)
+	{
+		if (g_vergilBossEffectBytesOurs >= 0x03)
+		{
+			return;
+		}
+
+		g_vergilBossEffectBytesOurs++;
+	}
+	else
+	{
+		if (g_vergilBossEffectBytesGame >= 0x02)
+		{
+			return;
+		}
+
+		g_vergilBossEffectBytesGame++;
+	}
+
+	uint32 words[0x60] = {};
+	bool crashed = false;
+
+	__try
+	{
+		for (uint32 off = 0; off < 0x180; off += 4)
+		{
+			words[(off / 4)] = *(uint32 *)(object + off);
+		}
+	}
+	__except (1)
+	{
+		crashed = true;
+	}
+
+	for (uint32 row = 0; (!crashed && (row < 0x08)); row++)
+	{
+		uint32 base = (row * 0x0C);
+
+		Log
+		(
+			"VergilBossMoves Bytes id=%X obj=%p src=%u o=%03X w0=%08X w1=%08X w2=%08X w3=%08X w4=%08X w5=%08X w6=%08X w7=%08X w8=%08X w9=%08X wa=%08X wb=%08X",
+			effect,
+			object,
+			(ours ? 1u : 0u),
+			(base * 4),
+			words[(base + 0x0)],
+			words[(base + 0x1)],
+			words[(base + 0x2)],
+			words[(base + 0x3)],
+			words[(base + 0x4)],
+			words[(base + 0x5)],
+			words[(base + 0x6)],
+			words[(base + 0x7)],
+			words[(base + 0x8)],
+			words[(base + 0x9)],
+			words[(base + 0xa)],
+			words[(base + 0xb)]
+		);
+	}
+}
+
+static void ProbeVergilBossEffectObject(byte8 * object, uint32 effect)
+{
+	if (!object)
+	{
+		return;
+	}
+
+	byte8 * vtable = nullptr;
+	uint32 flags = 0;
+	uint32 objectClass = 0;
+	uint32 objectId = 0;
+	byte8 * definition = nullptr;
+	uint32 active = 0;
+	uint32 attachMode = 0;
+	byte8 * attachMatrix = nullptr;
+
+	__try
+	{
+		vtable = *(byte8 **)object;
+		flags = *(uint32 *)(object + 0x10);
+		objectClass = *(uint32 *)(object + 0x68);
+		objectId = *(uint16 *)(object + 0x6C);
+		definition = *(byte8 **)(object + 0x148);
+		active = *(uint8 *)(object + 0x65);
+		attachMode = *(uint32 *)(object + 0xD8);
+		attachMatrix = *(byte8 **)(object + 0xC0);
+	}
+	__except (1)
+	{
+		Log("VergilBossMoves Object id=%X CRASH", effect);
+
+		return;
+	}
+
+	Log
+	(
+		"VergilBossMoves Object id=%X object=%p vtable=%p want=%p flags=%X class=%u id=%X def=%p active=%u mode=%u attach=%p",
+		effect,
+		object,
+		vtable,
+		(appBaseAddr + 0x508680),
+		flags,
+		objectClass,
+		objectId,
+		definition,
+		active,
+		attachMode,
+		attachMatrix
+	);
+
+	ProbeVergilBossEffectDefinition(definition, effect);
+
+	DumpVergilBossEffectBytes(object, effect, true);
+}
+
+//
+// v37 (1). The last unexplained difference is the per-effect-ID registration
+// table. 0x14008DBBA reads the effect id from [holder+0D0], then indexes a
+// table at imageBase+0C92DC0 with dword index (id >> 5) and bit (id & 31) and
+// SETS the bit when it is clear; a second table with the same indexing follows
+// at imageBase+0C92DD8. ddmk's ToggleEffectRelocations rewrites those accesses
+// to [actorData + newEffectIndices[0]] = 0xCAF0, so read all three and compare
+// the ids that draw (0x283 / 0x29C / 0x356) with the ids that do not
+// (0x337 / 0x338).
+//
+
+static uint32 g_vergilBossIdTableDumps = 0;
+
+static void DumpVergilBossEffectIdTable(PlayerActorData & actorData)
+{
+	if (g_vergilBossIdTableDumps >= 0x01)
+	{
+		return;
+	}
+
+	g_vergilBossIdTableDumps++;
+
+	static const uint32 ids[0x05] = { 0x283, 0x29C, 0x337, 0x338, 0x356 };
+
+	byte8 * global0 = (appBaseAddr + 0xC92DC0);
+	byte8 * global1 = (appBaseAddr + 0xC92DD8);
+	byte8 * actorTable = (reinterpret_cast<byte8 *>(&actorData) + 0xCAF0);
+
+	for (uint32 i = 0; (i < 0x05); i++)
+	{
+		uint32 id = ids[i];
+		uint32 index = (id >> 5);
+		uint32 bit = (id & 31);
+		uint32 word0 = 0;
+		uint32 word1 = 0;
+		uint32 wordA = 0;
+		bool crashed = false;
+
+		__try
+		{
+			word0 = *(uint32 *)(global0 + (index * 4));
+			word1 = *(uint32 *)(global1 + (index * 4));
+			wordA = *(uint32 *)(actorTable + (index * 4));
+		}
+		__except (1)
+		{
+			crashed = true;
+		}
+
+		if (crashed)
+		{
+			Log("VergilBossMoves IdTable id=%X CRASH", id);
+
+			continue;
+		}
+
+		Log
+		(
+			"VergilBossMoves IdTable id=%X idx=%X bit=%u g0=%08X g1=%08X actor=%08X",
+			id, index, bit, word0, word1, wordA
+		);
+	}
+}
+
+static byte8 * g_vergilBossEffectProbe = nullptr;
+static uint32 g_vergilBossEffectSnapshot[0x54] = {};
+static uint32 g_vergilBossEffectDiffReports = 0;
+
+//
+// v38. The definition dump (PLAN 8.39) shows that a definition is a list of
+// records of stride 0x2C, and the u16 at record+0x02 is a SUB-effect id in the
+// same numbering space as the top-level ids:
+//
+//   0x283 (drawn)  -> 0x0411, 0x0412, 0x0162
+//   0x29C (drawn)  -> 0x042F
+//   0x356 (drawn)  -> 0x052D
+//   0x337 (not)    -> 0x0106, 0x0107, 0x04E0, 0x00B7, 0x04E0, 0x0107
+//   0x338 (not)    -> 0x0206, 0x04E1
+//
+// The ids that draw reference sub ids in the 0x0400-0x05FF range, the ids that
+// do not reference a mix. Spawn the sub ids of 0x337 / 0x338 directly, with the
+// same matrix and the same post-spawn writes, and see whether any of them is
+// the piece that actually draws.
+//
+
+static void SpawnVergilBossMoveSubEffects(uint32 parent, byte8 * object, bool attach, byte8 * matrix)
+{
+	if (!g_vergilBossMoveEffectSubIds || !object || !func_2E7CA0)
+	{
+		return;
+	}
+
+	byte8 * definition = nullptr;
+	uint32 records = 0;
+
+	__try
+	{
+		definition = *(byte8 **)(object + 0x148);
+
+		if (definition)
+		{
+			records = *(uint16 *)definition;
+		}
+	}
+	__except (1)
+	{
+		return;
+	}
+
+	if (!definition || !records)
+	{
+		return;
+	}
+
+	if (records > 0x06)
+	{
+		records = 0x06;
+	}
+
+	for (uint32 i = 0; i < records; i++)
+	{
+		uint32 sub = 0;
+		byte8 * child = nullptr;
+		bool crashed = false;
+
+		__try
+		{
+			sub = *(uint16 *)((definition + 0x04) + (i * 0x2C) + 0x02);
+		}
+		__except (1)
+		{
+			crashed = true;
+		}
+
+		if (crashed || !sub)
+		{
+			continue;
+		}
+
+		crashed = false;
+
+		__try
+		{
+			child = func_2E7CA0(3, sub, (attach ? nullptr : matrix), 8);
+
+			if (child)
+			{
+				if (attach)
+				{
+					*(byte8 **)(child + 0xC0) = matrix;
+					*(uint32 *)(child + 0xD8) = 3;
+				}
+
+				*(byte8 *)(child + 0x65) = 1;
+			}
+		}
+		__except (1)
+		{
+			crashed = true;
+		}
+
+		Log
+		(
+			"VergilBossMoves Sub parent=%X rec=%u id=%X child=%p%s",
+			parent,
+			i,
+			sub,
+			child,
+			(crashed ? " CRASH" : "")
+		);
+	}
+}
+
+static void SpawnVergilBossMoveEffect(PlayerActorData & actorData, uint32 stepIndex, const VergilBossMotionStep & step)
+{
+	if (!g_vergilBossMoveEffects || !GetVergilBossMoveEffectEnabled(step.effect))
+	{
+		return;
+	}
+
+	if (!func_2E7CA0)
+	{
+		Log("VergilBossMoves Effect id=%X spawner not resolved", step.effect);
+
+		return;
+	}
+
+	//
+	// v33 measured the whole 0x180 of our objects. Our 0x283 IS drawn and our
+	// 0x337 / 0x338 are not, and across the entire block the only structural
+	// difference is the local transform at +0x80:
+	//
+	//   0x283 (drawn)   +0x80 = identity, translation (0, 2.0, 0)
+	//                   -> the game's own default, byte for byte the same as
+	//                      the game's live 0x29C effects
+	//   0x337 / 0x338   +0x80 = a rotation with translation
+	//                   (2483.2, -206.2, 4068.4) -> the model's WORLD matrix
+	//
+	// That is decided by the 3rd argument of the spawner: a NULL matrix makes
+	// 0x1402E7CA0 build its default local matrix, a non-NULL one is copied into
+	// +0x80 by 0x140030D00. We then attach the same world matrix at +0xC0 with
+	// mode 3, so the transform is applied TWICE and the effect is drawn far
+	// outside the view. So every effect goes through the barrier path: NULL
+	// matrix at spawn, attach afterwards.
+	//
+
+	int32 row = -1;
+	int32 slot = -1;
+	bool matrixCrashed = false;
+
+	auto matrix = GetVergilBossEffectMatrix(actorData, row, slot, matrixCrashed);
+
+	DumpVergilBossEffectSystem();
+
+	byte8 * object = nullptr;
+	byte8 * definition = nullptr;
+	bool retried = false;
+	bool crashed = false;
+
+	//
+	// The two forms the game itself uses, read verbatim out of dmc3.exe:
+	//
+	//   barrier 0x283 - player Vergil (0x1402293C5 and 3 more) and boss Vergil
+	//   (0x140179E80): r8 = NULL, then the caller writes the matrix pointer at
+	//   +0xC0 and the attach mode at +0xD8. The effect follows the bone.
+	//
+	//   summoned sword 0x337 - player (0x14009229D) and boss (0x140178448), and
+	//   judgement cut 0x338 - player (0x140225865, 0x1402258A9) and boss
+	//   (0x140179CF0 and 3 more): r8 = the model's matrix, and +0xC0 / +0xD8
+	//   are NEVER written. The effect is placed once in the world and does not
+	//   follow the bone.
+	//
+	// v33 passed the matrix AND attached it, so the transform was applied twice.
+	// v34 passed NULL and attached, which made our 0x337 / 0x338 objects
+	// byte-identical to the working 0x283 object - and they still did not draw,
+	// so the object state is not the gate. v35 uses each ID's own form: matrix
+	// only for 0x337 / 0x338, attach only for 0x283.
+	//
+
+	//
+	// v36: only the two IDs whose own game sites pass a world matrix use the
+	// world form. Everything else, including the control IDs, uses the barrier
+	// form that is proven to draw.
+	//
+
+	bool attach = (step.effect != VERGIL_BOSS_EFFECT::PHANTOM_SWORD) &&
+		(step.effect != VERGIL_BOSS_EFFECT::JUDGEMENT_CUT);
+
+	__try
+	{
+		if (func_324F20)
+		{
+			definition = func_324F20(appBaseAddr + 0xCF1270, step.effect);
+		}
+
+		object = func_2E7CA0(3, step.effect, (attach ? nullptr : matrix), 8);
+
+		//
+		// Fallback only: if the first form fails to allocate, try the other one.
+		//
+
+		if (!object)
+		{
+			retried = true;
+
+			object = func_2E7CA0(3, step.effect, (attach ? matrix : nullptr), 8);
+		}
+
+		//
+		// byte +0x65 = 1 is required for both forms.
+		// 0x140324460 initialises +0x65 to 0 through 0x1402E81B0, and the effect
+		// update code (0x1402EC2CA onwards) reads it, so an object without that
+		// byte is allocated but never runs. 304 sites in dmc3.exe write byte
+		// [+0x65] = 1 right after a spawn; none of them is set by the spawner.
+		//
+
+		if (object)
+		{
+			//
+			// Only the barrier form attaches. Writing +0xC0 / +0xD8 for 0x337 or
+			// 0x338 is what doubled the transform, and no game site for those two
+			// IDs writes them.
+			//
+
+			if (attach)
+			{
+				*(byte8 **)(object + 0xC0) = matrix;
+				*(uint32 *)(object + 0xD8) = 3;
+			}
+
+			*(byte8 *)(object + 0x65) = 1;
+
+			//
+			// Snapshot the object so the controller can diff it on later frames
+			// and tell an updated effect from an orphan.
+			//
+
+			g_vergilBossEffectProbe = object;
+			g_vergilBossEffectDiffReports = 0;
+
+			__try
+			{
+				for (uint32 off = 0; off < 0x150; off += 4)
+				{
+					g_vergilBossEffectSnapshot[(off / 4)] = *(uint32 *)(object + off);
+				}
+			}
+			__except (1)
+			{
+				g_vergilBossEffectProbe = nullptr;
+			}
+		}
+	}
+	__except (1)
+	{
+		crashed = true;
+	}
+
+	//
+	// v38: for the two ids that never draw, also spawn the sub-effect ids that
+	// their own definition lists.
+	//
+
+		if (!crashed && object &&
+			((step.effect == VERGIL_BOSS_EFFECT::PHANTOM_SWORD) ||
+			 (step.effect == VERGIL_BOSS_EFFECT::JUDGEMENT_CUT)))
+		{
+			SpawnVergilBossMoveSubEffects(step.effect, object, attach, matrix);
+		}
+
+	ProbeVergilBossEffectObject(object, step.effect);
+
+	Log
+	(
+		"VergilBossMoves Effect id=%X step=%u frame=%u row=%d slot=%d model=%X matrix=%p def=%p object=%p%s%s%s%s",
+		step.effect,
+		stepIndex,
+		step.effectFrame,
+		row,
+		slot,
+		actorData.activeModelIndex,
+		matrix,
+		definition,
+		object,
+		(matrixCrashed ? " MATRIX-CRASH" : ""),
+		(retried ? " RETRY" : ""),
+		(crashed ? " CRASH" : ""),
+		(attach ? " ATTACH" : " WORLD")
+	);
+}
+
+//
+// Every effect object comes out of the pool described at dmc3.exe+0x140CAB130
+// (buffer +0x08, block size +0x14, byte size +0x18) and every one of them
+// starts with the vtable the constructor stores, dmc3.exe+0x508680
+// (0x140324DE0). Walk the pool and list what is in it: if the game's own
+// effects are in here then this pool IS the live list and ours is missing
+// only a draw gate. If only ours are, the game keeps its effects elsewhere.
+//
+
+static void DumpVergilBossEffectPool(uint32 effect)
+{
+	static uint32 runs = 0;
+
+	if (runs >= 2)
+	{
+		return;
+	}
+
+	runs++;
+
+	auto descriptor = (appBaseAddr + 0xCAB130);
+	byte8 * buffer = nullptr;
+	uint32 blockSize = 0;
+	uint32 totalSize = 0;
+	bool crashed = false;
+
+	__try
+	{
+		buffer = *(byte8 **)(descriptor + 0x08);
+		blockSize = *(uint32 *)(descriptor + 0x14);
+		totalSize = *(uint32 *)(descriptor + 0x18);
+	}
+	__except (1)
+	{
+		crashed = true;
+	}
+
+	if (crashed || !buffer || !blockSize || (blockSize > 0x1000) || (totalSize > 0x400000))
+	{
+		Log
+		(
+			"VergilBossMoves PoolScan id=%X buffer=%p blockSize=%X total=%X crashed=%u",
+			effect,
+			buffer,
+			blockSize,
+			totalSize,
+			(crashed ? 1u : 0u)
+		);
+
+		return;
+	}
+
+	auto want = (appBaseAddr + 0x508680);
+	uint32 found = 0;
+	uint32 listed = 0;
+	bool stop = false;
+
+	for (uint32 off = 0; (!stop && ((off + 0x150) <= totalSize)); off += blockSize)
+	{
+		auto block = (buffer + off);
+		byte8 * vtable = nullptr;
+		byte8 * def = nullptr;
+		byte8 * attach = nullptr;
+		uint32 flags = 0;
+		uint32 active = 0;
+		uint32 effectClass = 0;
+		uint32 effectId = 0;
+		bool hit = false;
+
+		__try
+		{
+			vtable = *(byte8 **)block;
+
+			if (vtable == want)
+			{
+				flags = *(uint32 *)(block + 0x10);
+				active = *(uint8 *)(block + 0x65);
+				effectClass = *(uint32 *)(block + 0x68);
+				effectId = *(uint16 *)(block + 0x6C);
+				attach = *(byte8 **)(block + 0xC0);
+				def = *(byte8 **)(block + 0x148);
+				hit = true;
+			}
+		}
+		__except (1)
+		{
+			stop = true;
+		}
+
+		if (!hit)
+		{
+			continue;
+		}
+
+		found++;
+
+		if (listed < 24)
+		{
+			listed++;
+
+			Log
+			(
+				"VergilBossMoves PoolScan obj=%p off=%X flags=%X active=%u class=%u id=%X attach=%p def=%p",
+				block,
+				off,
+				flags,
+				active,
+				effectClass,
+				effectId,
+				attach,
+				def
+			);
+
+			//
+			// The game's own effects in this pool are the control group:
+			// they are drawn, so their definitions are the reference.
+			//
+
+			if (active)
+			{
+				ProbeVergilBossEffectDefinition(def, effectId);
+
+				if (effectId != effect)
+				{
+					DumpVergilBossEffectBytes(block, effectId, false);
+				}
+			}
+		}
+	}
+
+	Log
+	(
+		"VergilBossMoves PoolScan id=%X buffer=%p blockSize=%X total=%X objects=%u",
+		effect,
+		buffer,
+		blockSize,
+		totalSize,
+		found
+	);
+}
+
+//
+// Is the object actually being updated? Snapshot it at spawn and diff it on
+// later frames: a live effect advances its own counters, an orphan that no
+// update loop ever touches does not change at all.
+//
+
+static void DiffVergilBossEffectObject()
+{
+	if (!g_vergilBossEffectProbe || (g_vergilBossEffectDiffReports >= 3))
+	{
+		return;
+	}
+
+	uint32 changed = 0;
+
+	for (uint32 off = 0; off < 0x150; off += 4)
+	{
+		uint32 now = 0;
+		bool crashed = false;
+
+		__try
+		{
+			now = *(uint32 *)(g_vergilBossEffectProbe + off);
+		}
+		__except (1)
+		{
+			crashed = true;
+		}
+
+		if (crashed)
+		{
+			Log
+			(
+				"VergilBossMoves Diff object=%p CRASH off=%X",
+				g_vergilBossEffectProbe,
+				off
+			);
+
+			g_vergilBossEffectProbe = nullptr;
+
+			return;
+		}
+
+		if (now == g_vergilBossEffectSnapshot[(off / 4)])
+		{
+			continue;
+		}
+
+		changed++;
+
+		if (changed <= 12)
+		{
+			g_vergilBossEffectDiffReports++;
+
+			Log
+			(
+				"VergilBossMoves Diff object=%p off=%X old=%08X new=%08X",
+				g_vergilBossEffectProbe,
+				off,
+				g_vergilBossEffectSnapshot[(off / 4)],
+				now
+			);
+		}
+	}
+
+	if (!changed)
+	{
+		g_vergilBossEffectDiffReports++;
+
+		Log
+		(
+			"VergilBossMoves Diff object=%p unchanged",
+			g_vergilBossEffectProbe
+		);
+	}
+
+	__try
+	{
+		for (uint32 off = 0; off < 0x150; off += 4)
+		{
+			g_vergilBossEffectSnapshot[(off / 4)] = *(uint32 *)(g_vergilBossEffectProbe + off);
+		}
+	}
+	__except (1)
+	{
+		g_vergilBossEffectProbe = nullptr;
+	}
+}
+
+static bool PlayVergilBossMotionStep(byte8 * actorBaseAddr, PlayerActorData & actorData, const VergilBossMotionStep & step, bool quiet = false)
+{
+	if (g_vergilBossMotionDirectPlay)
+	{
+		return PlayVergilBossMotionStepDirect(actorData, step);
+	}
+
+	auto bossMotionArchive = GetBossVergilMotionArchive(step.group);
+
+	if (!bossMotionArchive)
+	{
+		if (g_vergilBossMovesDebugLog)
+		{
+			Log
+			(
+				"VergilBossMoves No boss motion archive group=%u",
+				step.group
+			);
+		}
+
+		return false;
+	}
+
+	auto & motionArchive = actorData.motionArchives[step.group];
+
+	auto lastMotionArchive = motionArchive;
+
+	motionArchive = bossMotionArchive;
+
+	if (!quiet)
+	{
+		Log
+		(
+			"VergilBossMoves Call group=%u index=%u boss=%p player=%p current=%u/%u",
+			step.group,
+			step.index,
+			bossMotionArchive,
+			lastMotionArchive,
+			actorData.motionData[UPPER_BODY].group,
+			actorData.motionData[UPPER_BODY].index
+		);
+	}
+
+	func_1EFB90
+	(
+		actorBaseAddr,
+		step.group,
+		step.index,
+		-1.0f,
+		-1,
+		2,
+		5
+	);
+
+	motionArchive = lastMotionArchive;
+
+	if (!quiet)
+	{
+		Log
+		(
+			"VergilBossMoves Call done group=%u index=%u result=%u/%u lower=%u/%u",
+			step.group,
+			step.index,
+			actorData.motionData[UPPER_BODY].group,
+			actorData.motionData[UPPER_BODY].index,
+			actorData.motionData[LOWER_BODY].group,
+			actorData.motionData[LOWER_BODY].index
+		);
+	}
+
+	return true;
+}
+
+static bool PlayVergilBossMotion
+(
+	byte8 * actorBaseAddr,
+	PlayerActorData & actorData,
+	uint32 event,
+	uint32 variant,
+	bool guard
+)
+{
+	if (!actorBaseAddr)
+	{
+		return false;
+	}
+
+	auto sequence = GetVergilBossMotionSequence(event, variant);
+
+	if (!sequence)
+	{
+		Log
+		(
+			"VergilBossMoves No motion sequence event=%u variant=%u",
+			event,
+			variant
+		);
+
+		return false;
+	}
+
+	old_for_all(uint32, bodyPart, countof(g_vergilBossModelData))
+	{
+		g_vergilBossModelData[bodyPart] = nullptr;
+	}
+
+	auto & step = sequence->steps[0];
+
+	if (!PlayVergilBossMotionStep(actorBaseAddr, actorData, step))
+	{
+		return false;
+	}
+
+	g_vergilBossMotion = { true, sequence, 0, 0, step.group, step.index };
+
+	g_vergilBossMovesGuard = guard;
+
+	ToggleInput(actorData, false);
+
+	ArmVergilBossMotionStep(0);
+
+	Log
+	(
+		"VergilBossMoves Played event=%u variant=%u group=%u index=%u hold=%u",
+		event,
+		variant,
+		step.group,
+		step.index,
+		g_vergilBossMotion.hold
+	);
+
+	return true;
+}
+
+static void EndVergilBossMotion(byte8 * actorBaseAddr)
+{
+	Log
+	(
+		"VergilBossMoves End step=%u frames=%u overrides=%u",
+		g_vergilBossMotion.step,
+		g_vergilBossMotion.frames,
+		g_vergilBossMotion.overrides
+	);
+
+	if (actorBaseAddr)
+	{
+		auto & actorData = *reinterpret_cast<PlayerActorData *>(actorBaseAddr);
+
+		ToggleInput(actorData, true);
+	}
+
+	g_vergilBossMotion = {};
+
+	old_for_all(uint32, bodyPart, countof(g_vergilBossModelData))
+	{
+		g_vergilBossModelData[bodyPart] = nullptr;
+	}
+
+	g_vergilBossMovesGuard = false;
+}
+
+export void VergilBossMovesController()
+{
+	IntroducePlayerCharacterNewActorData();
+
+	if
+	(
+		!activeConfig.enableVergilBossMoves ||
+		!activeConfig.Actor.enable
+	)
+	{
+		if (g_vergilBossMotion.active)
+		{
+			EndVergilBossMotion(activeNewActorData.baseAddr);
+		}
+
+		return;
+	}
+
+	if (InCutscene())
+	{
+		return;
+	}
+
+	//
+
+	if (g_vergilBossMotion.active)
+	{
+		if
+		(
+			activeCharacterData.character != CHARACTER::VERGIL ||
+			!g_vergilBossMotion.sequence ||
+			g_vergilBossMotion.step >= g_vergilBossMotion.sequence->count
+		)
+		{
+			EndVergilBossMotion(activeNewActorData.baseAddr);
+
+			return;
+		}
+
+		IntroduceData(activeNewActorData.baseAddr, activeActorData, PlayerActorData, return);
+
+		ToggleInput(activeActorData, false);
+
+		auto & motionData = activeActorData.motionData[UPPER_BODY];
+
+		g_vergilBossMotion.frames++;
+
+		auto & step = g_vergilBossMotion.sequence->steps[g_vergilBossMotion.step];
+
+		//
+		// The boss spawns each move's effect from inside its own state at a
+		// fixed point of the animation, so do the same at that frame
+		// (PLAN §8.25).
+		//
+
+		if
+		(
+			step.effect &&
+			!g_vergilBossMotion.effectSpawned &&
+			(g_vergilBossMotion.frames >= step.effectFrame)
+		)
+		{
+			g_vergilBossMotion.effectSpawned = true;
+
+			SpawnVergilBossMoveEffect(activeActorData, g_vergilBossMotion.step, step);
+
+			//
+			// Control experiment: the same call, the same frame, but with two
+			// effect IDs that the game itself spawns and draws.
+			//
+
+			if (g_vergilBossMoveEffectControl)
+			{
+				VergilBossMotionStep control = step;
+
+				control.effect = VERGIL_BOSS_EFFECT::CONTROL_29C;
+
+				SpawnVergilBossMoveEffect(activeActorData, g_vergilBossMotion.step, control);
+
+				control.effect = VERGIL_BOSS_EFFECT::CONTROL_356;
+
+				SpawnVergilBossMoveEffect(activeActorData, g_vergilBossMotion.step, control);
+			}
+
+			if (g_vergilBossMovesDebugLog)
+			{
+				DumpVergilBossEffectIdTable(activeActorData);
+
+				DumpVergilBossEffectPool(step.effect);
+			}
+		}
+
+		if (g_vergilBossMovesDebugLog)
+		{
+			DiffVergilBossEffectObject();
+		}
+
+		//
+		// Watch the model playback clock: if timer does not advance the
+		// motion is assigned but not running (still pose).
+		//
+
+		if
+		(
+			g_vergilBossMotionDirectPlay &&
+			g_vergilBossMovesDebugLog &&
+			(g_vergilBossMotion.frames % 15) == 0
+		)
+		{
+			auto modelDataAddr = g_vergilBossModelData[LOWER_BODY];
+
+			if (!modelDataAddr)
+			{
+				modelDataAddr = &activeActorData.newModelData[0];
+			}
+
+			Log
+			(
+				"VergilBossMoves Pose step=%u frames=%u want=%u/%u dur=%.2f/%.2f timer=%.2f/%.2f init=%u",
+				g_vergilBossMotion.step,
+				g_vergilBossMotion.frames,
+				step.group,
+				step.index,
+				modelDataAddr->Motion.duration[LOWER_BODY],
+				modelDataAddr->Motion.duration[UPPER_BODY],
+				modelDataAddr->Motion.timer[LOWER_BODY],
+				modelDataAddr->Motion.timer[UPPER_BODY],
+				(uint32) modelDataAddr->Motion.init
+			);
+		}
+
+		//
+		// A step held longer than its animation loops the animation,
+		// the way the boss's state machine holds a pose.
+		//
+
+		if
+		(
+			g_vergilBossMotion.length &&
+			g_vergilBossMotion.hold > g_vergilBossMotion.length
+		)
+		{
+			old_for_all(uint32, bodyPart, countof(g_vergilBossModelData))
+			{
+				auto modelDataAddr = g_vergilBossModelData[bodyPart];
+
+				if (!modelDataAddr)
+				{
+					continue;
+				}
+
+				auto & timer = modelDataAddr->Motion.timer[bodyPart];
+
+				if (timer >= (float32) g_vergilBossMotion.length)
+				{
+					timer -= (float32) g_vergilBossMotion.length;
+				}
+			}
+		}
+
+		//
+		// The player's own state machine keeps re-asserting its idle
+		// motion (observed: g3i65 replaced by g3i0 after 4 frames), so
+		// the move has to hold its motion the way the boss's state
+		// machine does, by re-asserting it whenever it is replaced.
+		//
+
+		// The direct route does not track motionData, so it cannot be
+		// re-asserted per frame without restarting the motion.
+		//
+
+		if
+		(
+			!g_vergilBossMotionDirectPlay &&
+			(
+				motionData.group != g_vergilBossMotion.group ||
+				motionData.index != g_vergilBossMotion.index
+			)
+		)
+		{
+			if (!g_vergilBossMotion.overrides)
+			{
+				Log
+				(
+					"VergilBossMoves Override step=%u want=%u/%u current=%u/%u",
+					g_vergilBossMotion.step,
+					g_vergilBossMotion.group,
+					g_vergilBossMotion.index,
+					motionData.group,
+					motionData.index
+				);
+			}
+
+			g_vergilBossMotion.overrides++;
+
+			PlayVergilBossMotionStep(activeNewActorData.baseAddr, activeActorData, step, true);
+		}
+
+		if (g_vergilBossMotion.frames >= g_vergilBossMotion.hold)
+		{
+			//
+			// Each step runs for the real length of its animation,
+			// read back from the model after it was assigned.
+			//
+
+			auto sequence = g_vergilBossMotion.sequence;
+			auto stepIndex = (g_vergilBossMotion.step + 1);
+
+			Log
+			(
+				"VergilBossMoves Step done step=%u frames=%u overrides=%u",
+				g_vergilBossMotion.step,
+				g_vergilBossMotion.frames,
+				g_vergilBossMotion.overrides
+			);
+
+			if (sequence && stepIndex < sequence->count)
+			{
+				auto & nextStep = sequence->steps[stepIndex];
+
+				if (PlayVergilBossMotionStep(activeNewActorData.baseAddr, activeActorData, nextStep))
+				{
+					g_vergilBossMotion.step = stepIndex;
+					g_vergilBossMotion.frames = 0;
+					g_vergilBossMotion.group = nextStep.group;
+					g_vergilBossMotion.index = nextStep.index;
+					g_vergilBossMotion.overrides = 0;
+					g_vergilBossMotion.effectSpawned = false;
+
+					ArmVergilBossMotionStep(stepIndex);
+
+					Log
+					(
+						"VergilBossMoves Next step=%u group=%u index=%u hold=%u",
+						stepIndex,
+						nextStep.group,
+						nextStep.index,
+						g_vergilBossMotion.hold
+					);
+				}
+				else
+				{
+					EndVergilBossMotion(activeNewActorData.baseAddr);
+				}
+			}
+			else
+			{
+				EndVergilBossMotion(activeNewActorData.baseAddr);
+			}
+		}
+
+		return;
+	}
+
+	//
+
+	if (activeCharacterData.character != CHARACTER::VERGIL)
+	{
+		return;
+	}
+
+	IntroduceData(activeNewActorData.baseAddr, activeActorData, PlayerActorData, return);
+
+	//
+	// Trigger from neutral state only. IsActive() cannot be used
+	// here: IsWeaponActive() makes it true for Vergil whenever a
+	// weapon motion is playing. Use the action == 0 gate, same as
+	// ResetSkyStar.
+	//
+
+	if (activeActorData.action != 0)
+	{
+		return;
+	}
+
+	if (!(activeActorData.state & STATE::ON_FLOOR))
+	{
+		return;
+	}
+
+	static bool executes[8] = {};
+
+	auto & gamepad = GetGamepad(0);
+
+	auto tiltDirection = GetRelativeTiltDirection(activeActorData);
+
+	auto lockOn = (gamepad.buttons[0] & GetBinding(BINDING::LOCK_ON));
+
+	using namespace EVENT_BOSS_VERGIL;
+
+	// Boss Vergil Strong Shield
+	{
+		auto & execute = executes[0];
+
+		if
+		(
+			(gamepad.buttons[0] & GetBinding(BINDING::DEVIL_TRIGGER)) &&
+			lockOn &&
+			(tiltDirection == TILT_DIRECTION::DOWN)
+		)
+		{
+			if (execute)
+			{
+				execute = false;
+
+				auto weapon = GetMeleeWeapon(activeActorData);
+
+				uint32 variant = 1;
+
+				if (weapon == WEAPON::YAMATO_FORCE_EDGE)
+				{
+					variant = 2;
+				}
+
+				PlayVergilBossMotion(activeNewActorData.baseAddr, activeActorData, STRONG_SHIELD, variant, true);
+			}
+		}
+		else
+		{
+			execute = true;
+		}
+	}
+
+	// Boss Vergil Shield
+	{
+		auto & execute = executes[1];
+
+		if (gamepad.buttons[0] & GetBinding(BINDING::SHOOT))
+		{
+			if (execute)
+			{
+				execute = false;
+
+				if (!lockOn)
+				{
+					PlayVergilBossMotion(activeNewActorData.baseAddr, activeActorData, SHIELD, 0, true);
+				}
+			}
+		}
+		else
+		{
+			execute = true;
+		}
+	}
+
+	// Boss Vergil Block
+	{
+		auto & execute = executes[2];
+
+		if (gamepad.buttons[0] & GetBinding(BINDING::STYLE_ACTION))
+		{
+			if (execute)
+			{
+				execute = false;
+
+				if (!lockOn)
+				{
+					PlayVergilBossMotion(activeNewActorData.baseAddr, activeActorData, BLOCK, 0, true);
+				}
+			}
+		}
+		else
+		{
+			execute = true;
+		}
+	}
+
+	// Boss Vergil Super Judgement Cut
+	{
+		auto & execute = executes[3];
+
+		if
+		(
+			(gamepad.buttons[0] & GetBinding(BINDING::MELEE_ATTACK)) &&
+			(gamepad.buttons[0] & GetBinding(BINDING::STYLE_ACTION)) &&
+			lockOn &&
+			(
+				tiltDirection == TILT_DIRECTION::DOWN ||
+				tiltDirection == TILT_DIRECTION::UP
+			)
+		)
+		{
+			if (execute)
+			{
+				execute = false;
+
+				uint32 event = YAMATO_SUPER_JUDGEMENT_CUT;
+
+				if (tiltDirection == TILT_DIRECTION::UP)
+				{
+					event = YAMATO_SUPER_JUDGEMENT_CUT_FOLLOW;
+				}
+
+				PlayVergilBossMotion(activeNewActorData.baseAddr, activeActorData, event, 0, false);
+			}
+		}
+		else
+		{
+			execute = true;
+		}
+	}
+}
+
+
+
+
 
 
 
@@ -11118,6 +13230,12 @@ float ApplyDamage
 		}
 	}
 
+	// Vergil Boss Moves
+	if (match && g_vergilBossMovesGuard)
+	{
+		return 0;
+	}
+
 	// Enemy
 	if (!match)
 	{
@@ -11594,7 +13712,7 @@ bool DeactivateDoppelgangerDeathCheck(PlayerActorData & actorData)
 		DeactivateDoppelganger(actorData);
 
 		cloneActorData.doppelganger = actorData.doppelganger = false;
-		actorData.var_6340 = 0;
+		actorData.guardState = 0;
 		actorData.cloneStatus = CLONE_STATUS::IDLE;
 		/*
 		dmc3.exe+1E2AD8 - C6 81 62630000 00       - mov byte ptr [rcx+00006362],00
@@ -16348,6 +18466,248 @@ export void ToggleRoyalguardForceJustFrameRelease(bool enable)
 	}
 
 	run = true;
+}
+
+
+export void ToggleRoyalguardAutoJustGuard(bool enable)
+{
+	LogFunction(enable);
+
+	static bool run = false;
+
+	// Block Type
+	{
+		auto addr = (appBaseAddr + 0x1EE4FD);
+		constexpr uint32 size = 2;
+		/*
+		dmc3.exe+1EE4F6 - 83BB 70630000 01       - cmp dword ptr [rbx+00006370],01
+		dmc3.exe+1EE4FD - 75 0C                  - jne dmc3.exe+1EE50B
+		dmc3.exe+1EE4FF - C783 6C630000 05000000 - mov dword ptr [rbx+0000636C],05
+		*/
+
+		if (!run)
+		{
+			backupHelper.Save(addr, size);
+		}
+
+		if (enable)
+		{
+			Write<uint8>(addr, 0xEB); // jne -> jmp, always grade below
+		}
+		else
+		{
+			backupHelper.Restore(addr);
+		}
+	}
+
+	// Guard Grade
+	{
+		auto addr = (appBaseAddr + 0x1EE516);
+		constexpr uint32 size = 2;
+		/*
+		dmc3.exe+1EE513 - 0F2F C2                - comiss xmm0,xmm2
+		dmc3.exe+1EE516 - 72 0C                  - jb dmc3.exe+1EE524
+		dmc3.exe+1EE518 - C783 6C630000 03000000 - mov dword ptr [rbx+0000636C],03
+		*/
+
+		if (!run)
+		{
+			backupHelper.Save(addr, size);
+		}
+
+		if (enable)
+		{
+			WriteNop(addr, size); // grade 3 = Just Guard
+		}
+		else
+		{
+			backupHelper.Restore(addr);
+		}
+	}
+
+	run = true;
+}
+
+
+bool RoyalguardAutoGuardCheck(PlayerActorData & actorData)
+{
+	if
+	(
+		!activeConfig.Royalguard.autoGuard ||
+		!activeConfig.Actor.enable
+	)
+	{
+		return false;
+	}
+
+	if (actorData.style != STYLE::ROYALGUARD)
+	{
+		return false;
+	}
+
+	// Already blocking: let the game grade the hit itself.
+	if (actorData.guardState == 1)
+	{
+		return false;
+	}
+
+	// Pretend the block button was just pressed.
+	// guardState 1 passes the "is blocking" check and blockPressTime 0 puts
+	// the hit inside the Just Guard window.
+	actorData.guardState     = 1;
+	actorData.blockPressTime = 0.0f;
+
+	// Inject the block button so the game runs its own block entry and, once
+	// we stop injecting, its own Just Release. The stick is left alone.
+	actorData.newInjectButtons   = GetBinding(BINDING::STYLE_ACTION);
+	actorData.newAutoGuardFrames = activeConfig.Royalguard.autoGuardHold;
+
+	return true;
+}
+
+
+export void ToggleRoyalguardAutoGuard(bool enable)
+{
+	LogFunction(enable);
+
+	static bool run = false;
+
+	// Guard State
+	{
+		auto addr     = (appBaseAddr + 0x1EE468);
+		auto jumpAddr = (appBaseAddr + 0x1EE471);
+		constexpr uint32 size = 9;
+		/*
+		dmc3.exe+1EE468 - 83B9 40630000 01 - cmp dword ptr [rcx+00006340],01
+		dmc3.exe+1EE46F - 75 E7            - jne dmc3.exe+1EE458
+		dmc3.exe+1EE471 - 8B89 58630000    - mov ecx,[rcx+00006358]
+		*/
+
+		static Function func = {};
+
+		constexpr byte8 sect2[] =
+		{
+			0x84, 0xC0,                                        // test al,al
+			0x0F, 0x85, 0x00, 0x00, 0x00, 0x00,               // jne dmc3.exe+1EE471
+			0x83, 0xB9, 0x40, 0x63, 0x00, 0x00, 0x01,         // cmp dword ptr [rcx+00006340],01
+			0x0F, 0x85, 0x00, 0x00, 0x00, 0x00,               // jne dmc3.exe+1EE458
+		};
+
+		if (!run)
+		{
+			backupHelper.Save(addr, size);
+
+			func = old_CreateFunction(RoyalguardAutoGuardCheck, jumpAddr, true, false, 0, 0, sizeof(sect2));
+
+			CopyMemory(func.sect2, sect2, sizeof(sect2));
+
+			WriteAddress((func.sect2 + 2),  (appBaseAddr + 0x1EE471), 6);
+			WriteAddress((func.sect2 + 15), (appBaseAddr + 0x1EE458), 6);
+		}
+
+		if (enable)
+		{
+			WriteJump(addr, func.addr, (size - 5));
+		}
+		else
+		{
+			backupHelper.Restore(addr);
+		}
+	}
+
+	// Inject Block Button
+	{
+		auto addr     = (appBaseAddr + 0x1EBD34);
+		auto jumpAddr = (appBaseAddr + 0x1EBD3B);
+		constexpr uint32 size = 7;
+		/*
+		dmc3.exe+1EBD34 - 6689 83E0740000 - mov word ptr [rbx+000074E0],ax
+		dmc3.exe+1EBD3B - 488D 0DCE8CB600 - lea rcx,[0000000140D54A10]
+		*/
+
+		static Function func = {};
+
+		constexpr byte8 sect0[] =
+		{
+			0x66, 0x0B, 0x83, 0x00, 0x00, 0x00, 0x00, //or ax,[rbx+00000000]
+		};
+
+		if (!run)
+		{
+			backupHelper.Save(addr, size);
+
+			func = old_CreateFunction(0, jumpAddr, false, true, (sizeof(sect0) + size));
+
+			CopyMemory(func.sect0, sect0, sizeof(sect0));
+			CopyMemory((func.sect0 + sizeof(sect0)), addr, size, MemoryFlags_VirtualProtectSource);
+
+			*reinterpret_cast<uint32 *>(func.sect0 + 3) = offsetof(PlayerActorData, newInjectButtons);
+		}
+
+		if (enable)
+		{
+			WriteJump(addr, func.addr, (size - 5));
+		}
+		else
+		{
+			backupHelper.Restore(addr);
+		}
+	}
+
+	run = true;
+}
+
+
+export void RoyalguardAutoGuardController()
+{
+	if
+	(
+		!activeConfig.Royalguard.autoGuard ||
+		!activeConfig.Actor.enable
+	)
+	{
+		return;
+	}
+
+	IntroducePlayerCharacterNewActorData();
+
+	IntroduceData(activeNewActorData.baseAddr, activeActorData, PlayerActorData, return);
+
+	if (activeActorData.style != STYLE::ROYALGUARD)
+	{
+		activeActorData.newInjectButtons = 0;
+
+		return;
+	}
+
+	bool inject = false;
+
+	if (activeActorData.newAutoGuardFrames)
+	{
+		activeActorData.newAutoGuardFrames--;
+
+		inject = true;
+	}
+
+	// Self heal. The check sets guardState to get the hit graded as a guard. If
+	// the game never entered a block stance for it (a blocked action, a cutscene
+	// transition, ...) nothing else clears it again, which would leave the player
+	// permanently guarded. Only touches a state the game itself never holds:
+	// guardState 1 with no injected button, no held block button and no stance.
+	auto actorBase = reinterpret_cast<byte8 *>(&activeActorData);
+
+	if
+	(
+		!inject &&
+		(activeActorData.guardState == 1) &&
+		!(activeActorData.buttons[0] & GetBinding(BINDING::STYLE_ACTION)) &&
+		!*reinterpret_cast<uint8 *>(actorBase + 0x3E10)
+	)
+	{
+		activeActorData.guardState = 0;
+	}
+
+	activeActorData.newInjectButtons = (inject) ? GetBinding(BINDING::STYLE_ACTION) : 0;
 }
 
 

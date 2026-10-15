@@ -91,6 +91,9 @@ export typedef void(__fastcall * func_32BE20_t)(byte8 * dest); // Init Track
 export typedef void(__fastcall * func_32BA90_t)(byte8 * dest, const char * location, uint32, uint32); // Set Track
 export typedef byte8 *(__fastcall * func_8A520_t)(ModelData & modelData);
 export typedef void(__fastcall * func_30E630_t)(byte8 * dest, uint32 index);
+export typedef uint32(__fastcall * func_1FAA50_t)(byte8 * actorBaseAddr); // Current Weapon Index
+export typedef byte8 *(__fastcall * func_2E7CA0_t)(uint32 classId, uint32 effectId, byte8 * matrix, uint32 flags); // Spawn Effect Object
+export typedef byte8 *(__fastcall * func_324F20_t)(byte8 * registry, uint32 effectId); // Find Effect Definition
 
 export func_897B0_t func_897B0 = 0; // (ModelData & modelData)
 export func_89450_t func_89450 = 0; // (ModelData & modelData)
@@ -173,6 +176,9 @@ export func_32BE20_t func_32BE20 = 0; // (byte8 * dest)
 export func_32BA90_t func_32BA90 = 0; // (byte8 * dest, const char * location, uint32, uint32)
 export func_8A520_t func_8A520 = 0; // (ModelData & modelData)
 export func_30E630_t func_30E630 = 0; // (byte8 * dest, uint32 index)
+export func_1FAA50_t func_1FAA50 = 0; // (byte8 * actorBaseAddr)
+export func_2E7CA0_t func_2E7CA0 = 0; // (uint32 classId, uint32 effectId, byte8 * matrix, uint32 flags)
+export func_324F20_t func_324F20 = 0; // (byte8 * registry, uint32 effectId)
 
 export void Internal_Init()
 {
@@ -501,6 +507,25 @@ export void Internal_Init()
 	{
 		auto func = old_CreateFunction((appBaseAddr + 0x30E630));
 		func_30E630 = (func_30E630_t)func.addr;
+	}
+	{
+		auto func = old_CreateFunction((appBaseAddr + 0x1FAA50));
+		func_1FAA50 = (func_1FAA50_t)func.addr;
+	}
+	{
+		//
+		// noResult = false: the default old_CreateFunction trampoline pushes rax
+		// before the call and pops it back afterwards, which DISCARDS the game
+		// function's return value. The spawner and the definition lookup both
+		// return the object, so they need the result preserved.
+		//
+
+		auto func = old_CreateFunction((appBaseAddr + 0x2E7CA0), 0, true, false);
+		func_2E7CA0 = (func_2E7CA0_t)func.addr;
+	}
+	{
+		auto func = old_CreateFunction((appBaseAddr + 0x324F20), 0, true, false);
+		func_324F20 = (func_324F20_t)func.addr;
 	}
 }
 

@@ -273,7 +273,7 @@ enum
 };
 namespaceEnd();
 
-enum
+export enum
 {
 	CollisionFlags_Player = 0x30443, // dmc3.exe+173B5D - C7 86 D0020000 43040300 - mov [rsi+000002D0],00030443
 	CollisionFlags_Enemy  = 0x3050C, // dmc3.exe+173B76 - C7 86 D0020000 0C050300 - mov [rsi+000002D0],0003050C
@@ -289,7 +289,7 @@ enum
 };
 namespaceEnd();
 
-namespaceStart(ENTITY);
+export namespaceStart(ENTITY);
 enum
 {
 	MAIN,
@@ -927,7 +927,7 @@ enum
 };
 namespaceEnd();
 
-namespaceStart(PERMISSION);
+export namespaceStart(PERMISSION);
 enum
 {
 	UPDATE = 1,
@@ -940,7 +940,7 @@ enum
 };
 namespaceEnd();
 
-namespaceStart(STATE);
+export namespaceStart(STATE);
 enum
 {
 	ON_FLOOR = 1,
@@ -3154,7 +3154,7 @@ export struct PlayerActorDataBase : ActorDataBase
 	LockOnData lockOnData; // 0x41C0
 	uint32 style; // 0x6338
 	uint32 wallHikeDirection; // 0x633C
-	uint32 var_6340; // 0x6340
+	uint32 guardState; // 0x6340
 	_(20);
 	uint32 styleLevel; // 0x6358
 	uint8 dashCount; // 0x635C
@@ -3173,7 +3173,7 @@ export struct PlayerActorDataBase : ActorDataBase
 	uint8 royalguardReleaseEffectIndex; // 0x6381
 	_(2);
 	float royalguardReleaseDamage; // 0x6384
-	float var_6388; // 0x6388
+	float blockPressTime; // 0x6388
 	float var_638C; // 0x638C
 	_(64);
 	uint32 var_63D0; // 0x63D0
@@ -3301,7 +3301,7 @@ static_assert(offsetof(PlayerActorDataBase, hitPoints) == 0x411C);
 static_assert(offsetof(PlayerActorDataBase, lockOnData) == 0x41C0);
 static_assert(offsetof(PlayerActorDataBase, style) == 0x6338);
 static_assert(offsetof(PlayerActorDataBase, wallHikeDirection) == 0x633C);
-static_assert(offsetof(PlayerActorDataBase, var_6340) == 0x6340);
+static_assert(offsetof(PlayerActorDataBase, guardState) == 0x6340);
 static_assert(offsetof(PlayerActorDataBase, styleLevel) == 0x6358);
 static_assert(offsetof(PlayerActorDataBase, dashCount) == 0x635C);
 static_assert(offsetof(PlayerActorDataBase, skyStarCount) == 0x635D);
@@ -3315,7 +3315,7 @@ static_assert(offsetof(PlayerActorDataBase, royalguardBlockType) == 0x6370);
 static_assert(offsetof(PlayerActorDataBase, royalguardReleaseLevel) == 0x6380);
 static_assert(offsetof(PlayerActorDataBase, royalguardReleaseEffectIndex) == 0x6381);
 static_assert(offsetof(PlayerActorDataBase, royalguardReleaseDamage) == 0x6384);
-static_assert(offsetof(PlayerActorDataBase, var_6388) == 0x6388);
+static_assert(offsetof(PlayerActorDataBase, blockPressTime) == 0x6388);
 static_assert(offsetof(PlayerActorDataBase, var_638C) == 0x638C);
 static_assert(offsetof(PlayerActorDataBase, var_63D0) == 0x63D0);
 static_assert(offsetof(PlayerActorDataBase, quicksilverStage) == 0x63D4);
@@ -3409,7 +3409,9 @@ export struct PlayerActorData : PlayerActorDataBase
 	uint8 newTrickDownCount; // 0x1CAE2
 	uint8 newAirStingerCount; // 0x1CAE3
 	uint8 newAirRisingSunCount; // 0x1CAE4
-	_(11);
+	byte16 newInjectButtons; // 0x1CAE5
+	uint8 newAutoGuardFrames; // 0x1CAE7
+	_(8);
 	uint32 newEffectIndices[12]; // 0x1CAF0
 	uint32 newLastVar; // 0x1CB20
 };
@@ -3458,6 +3460,8 @@ static_assert(offsetof(PlayerActorData, newTrickUpCount) == 0x1CAE1);
 static_assert(offsetof(PlayerActorData, newTrickDownCount) == 0x1CAE2);
 static_assert(offsetof(PlayerActorData, newAirStingerCount) == 0x1CAE3);
 static_assert(offsetof(PlayerActorData, newAirRisingSunCount) == 0x1CAE4);
+static_assert(offsetof(PlayerActorData, newInjectButtons) == 0x1CAE5);
+static_assert(offsetof(PlayerActorData, newAutoGuardFrames) == 0x1CAE7);
 static_assert(offsetof(PlayerActorData, newEffectIndices) == 0x1CAF0);
 static_assert(offsetof(PlayerActorData, newLastVar) == 0x1CB20);
 
@@ -3536,7 +3540,9 @@ export struct PlayerActorDataDante : PlayerActorDataBase
 	uint8 newTrickDownCount; // 0x1CAE2
 	uint8 newAirStingerCount; // 0x1CAE3
 	uint8 newAirRisingSunCount; // 0x1CAE4
-	_(11);
+	byte16 newInjectButtons; // 0x1CAE5
+	uint8 newAutoGuardFrames; // 0x1CAE7
+	_(8);
 	uint32 newEffectIndices[12]; // 0x1CAF0
 	uint32 newLastVar; // 0x1CB20
 };
@@ -3600,6 +3606,8 @@ static_assert(offsetof(PlayerActorDataDante, newTrickUpCount) == 0x1CAE1);
 static_assert(offsetof(PlayerActorDataDante, newTrickDownCount) == 0x1CAE2);
 static_assert(offsetof(PlayerActorDataDante, newAirStingerCount) == 0x1CAE3);
 static_assert(offsetof(PlayerActorDataDante, newAirRisingSunCount) == 0x1CAE4);
+static_assert(offsetof(PlayerActorDataDante, newInjectButtons) == 0x1CAE5);
+static_assert(offsetof(PlayerActorDataDante, newAutoGuardFrames) == 0x1CAE7);
 static_assert(offsetof(PlayerActorDataDante, newEffectIndices) == 0x1CAF0);
 static_assert(offsetof(PlayerActorDataDante, newLastVar) == 0x1CB20);
 
@@ -3656,7 +3664,9 @@ export struct PlayerActorDataBob : PlayerActorDataBase
 	uint8 newTrickDownCount; // 0x1CAE2
 	uint8 newAirStingerCount; // 0x1CAE3
 	uint8 newAirRisingSunCount; // 0x1CAE4
-	_(11);
+	byte16 newInjectButtons; // 0x1CAE5
+	uint8 newAutoGuardFrames; // 0x1CAE7
+	_(8);
 	uint32 newEffectIndices[12]; // 0x1CAF0
 	uint32 newLastVar; // 0x1CB20
 };
@@ -3705,6 +3715,8 @@ static_assert(offsetof(PlayerActorDataBob, newTrickUpCount) == 0x1CAE1);
 static_assert(offsetof(PlayerActorDataBob, newTrickDownCount) == 0x1CAE2);
 static_assert(offsetof(PlayerActorDataBob, newAirStingerCount) == 0x1CAE3);
 static_assert(offsetof(PlayerActorDataBob, newAirRisingSunCount) == 0x1CAE4);
+static_assert(offsetof(PlayerActorDataBob, newInjectButtons) == 0x1CAE5);
+static_assert(offsetof(PlayerActorDataBob, newAutoGuardFrames) == 0x1CAE7);
 static_assert(offsetof(PlayerActorDataBob, newEffectIndices) == 0x1CAF0);
 static_assert(offsetof(PlayerActorDataBob, newLastVar) == 0x1CB20);
 
@@ -3761,7 +3773,9 @@ export struct PlayerActorDataLady : PlayerActorDataBase
 	uint8 newTrickDownCount; // 0x1CAE2
 	uint8 newAirStingerCount; // 0x1CAE3
 	uint8 newAirRisingSunCount; // 0x1CAE4
-	_(11);
+	byte16 newInjectButtons; // 0x1CAE5
+	uint8 newAutoGuardFrames; // 0x1CAE7
+	_(8);
 	uint32 newEffectIndices[12]; // 0x1CAF0
 	uint32 newLastVar; // 0x1CB20
 };
@@ -3810,6 +3824,8 @@ static_assert(offsetof(PlayerActorDataLady, newTrickUpCount) == 0x1CAE1);
 static_assert(offsetof(PlayerActorDataLady, newTrickDownCount) == 0x1CAE2);
 static_assert(offsetof(PlayerActorDataLady, newAirStingerCount) == 0x1CAE3);
 static_assert(offsetof(PlayerActorDataLady, newAirRisingSunCount) == 0x1CAE4);
+static_assert(offsetof(PlayerActorDataLady, newInjectButtons) == 0x1CAE5);
+static_assert(offsetof(PlayerActorDataLady, newAutoGuardFrames) == 0x1CAE7);
 static_assert(offsetof(PlayerActorDataLady, newEffectIndices) == 0x1CAF0);
 static_assert(offsetof(PlayerActorDataLady, newLastVar) == 0x1CB20);
 
@@ -3876,7 +3892,9 @@ export struct PlayerActorDataVergil : PlayerActorDataBase
 	uint8 newTrickDownCount; // 0x1CAE2
 	uint8 newAirStingerCount; // 0x1CAE3
 	uint8 newAirRisingSunCount; // 0x1CAE4
-	_(11);
+	byte16 newInjectButtons; // 0x1CAE5
+	uint8 newAutoGuardFrames; // 0x1CAE7
+	_(8);
 	uint32 newEffectIndices[12]; // 0x1CAF0
 	uint32 newLastVar; // 0x1CB20
 };
@@ -3932,6 +3950,8 @@ static_assert(offsetof(PlayerActorDataVergil, newTrickUpCount) == 0x1CAE1);
 static_assert(offsetof(PlayerActorDataVergil, newTrickDownCount) == 0x1CAE2);
 static_assert(offsetof(PlayerActorDataVergil, newAirStingerCount) == 0x1CAE3);
 static_assert(offsetof(PlayerActorDataVergil, newAirRisingSunCount) == 0x1CAE4);
+static_assert(offsetof(PlayerActorDataVergil, newInjectButtons) == 0x1CAE5);
+static_assert(offsetof(PlayerActorDataVergil, newAutoGuardFrames) == 0x1CAE7);
 static_assert(offsetof(PlayerActorDataVergil, newEffectIndices) == 0x1CAF0);
 static_assert(offsetof(PlayerActorDataVergil, newLastVar) == 0x1CB20);
 

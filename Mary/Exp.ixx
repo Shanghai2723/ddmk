@@ -25,7 +25,7 @@ import Vars;
 const char * directoryName = "configs";
 const char * fileName      = "Mary_Exp.json";
 
-char location[64] = {};
+static char location[64] = {};
 
 
 
